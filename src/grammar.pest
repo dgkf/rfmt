@@ -1,0 +1,166 @@
+//
+// Since newlines are sometimes meaningful syntax, we need to specify what
+// whitespace is permitted where.
+//
+// This might be easier in future versions of `pest`, though the addition of
+// this feature has not moved much since the middle of 2022:
+// https://github.com/pest-parser/pest/issues/271
+//
+
+// whitespace helpers
+
+    WS_NO_NL = _{ " " | "\\t" }
+    WS = _{ WS_NO_NL | NEWLINE }
+    WB = _{ eoi | !ASCII_ALPHA } // boundary
+    CAPTURE_WS = { WS+ }
+    eoi  = _{ !ANY }  // since EOI does not parse silently, define our own
+
+// file parsing (multiple top-level expressions with possible comments)
+
+    exprs = _{ (WS* ~ (expr | comment))* }
+
+// repl line feed parsing
+
+    repl = _{ WS* ~ expr ~ WS* ~ comment? ~ eoi | WS* ~ block_exprs ~ WS* ~ eoi }
+
+// expression basics
+
+    expr = { atomic ~ ( WS* ~ infix ~ WS* ~ atomic )* }
+
+        comment = _{ "#" ~ ( !NEWLINE ~ !eoi ~ ANY )* }
+
+        atomic = _{ prefixed }
+            prefixed = { prefix* ~ WS* ~ postfixed }
+            postfixed = { atom ~ WS_NO_NL* ~ postfix* }
+
+        infix = _{
+                left_global_assign | right_global_assign |
+                left_assign | right_assign | eq_assign | 
+                add | subtract | multiply | divide | modulo | power |
+                pipe |
+                colon |
+                gte | lte | gt | eq | neq | lt |
+                or | vor | and | vand |
+                special |
+                dollar |
+                doublecolon | triplecolon
+            }
+
+            // numerics
+            add = { "+" }
+            subtract = { "-" }
+            multiply = { "*" }
+            divide = { "/" }
+            modulo = { "%%" }
+            power = { "^" }
+
+            // comparison
+            gt = { ">" }
+            gte = { ">=" }
+            eq = { "==" }
+            neq = { "!=" }
+            lt = { "<" }
+            lte = { "<=" }
+            or = { "||" }
+            vor = { "|" }
+            and = { "&&" }
+            vand = { "&" }
+
+            // assignment
+            left_global_assign = { "<<-" }
+            right_global_assign = { "->>" }
+            left_assign = { "<-" }
+            right_assign = { "->" }
+            eq_assign = { ("=" ~ !("=")) }
+
+            // special
+            special = { "%" ~ !("%") ~ "%" }
+            pipe = { "|>" }
+            dollar = { "$" }
+            colon = { ":" }
+            doublecolon = { "::" }
+            triplecolon = { ":::" }
+
+        prefix = _{ subtract | not }
+            not = { "!" }
+
+        postfix = _{ call | index | vector_index }
+            call         = { "("  ~ pairs ~  ")" }
+            index        = { "[[" ~ pairs ~ "]]" }
+            vector_index = { "["  ~ pairs ~  "]" }
+
+        block  = _{ "{" ~ WS* ~ block_exprs ~ WS* ~ "}" }
+            block_exprs = { WS* ~ expr? ~ ( block_sep+ ~ expr? )* ~ WS* }
+            block_sep = _{ WS_NO_NL* ~ ( ";" | comment? ~ NEWLINE ) ~ WS* }
+
+        paren_expr = { "(" ~ WS* ~ expr ~ WS* ~ ")" }
+
+        atom = _{
+              block
+            | paren_expr
+            | kw_function
+            | kw_break
+            | kw_continue
+            | kw_return
+            | kw_if_else
+            | kw_for
+            | kw_while
+            | kw_repeat
+            | val_null
+            | val_na
+            | val_inf
+            | val_true
+            | val_false
+            | integer_expr
+            | string_expr
+            | number
+            | symbol
+        }
+
+// keyworded (kw) syntax
+
+    kw_function = { "function" ~ WS* ~ "(" ~ pairs ~ ")" ~ WS* ~ expr }
+    kw_if_else = { "if" ~ WS* ~ "(" ~ WS* ~ expr ~ WS* ~ ")" ~ WS* ~ expr ~ ( WS* ~ "else" ~ WS* ~ expr )? }
+    kw_for = { "for" ~ WS* ~ "(" ~ WS* ~ symbol ~ WS+ ~ "in" ~ WS+ ~ expr ~ WS* ~ ")" ~ WS* ~ expr }
+    kw_while = { "while" ~ WS* ~ "(" ~ WS* ~ expr ~ WS* ~ ")" ~ WS* ~ expr }
+    kw_repeat = { "repeat" ~ WS* ~ expr }
+    kw_break = { "break" }
+    kw_continue = { "continue" }
+    kw_return = { "return" ~ WS* ~ expr }
+
+// reserved value (val) types
+
+    val_null = { ( "NULL" ) ~ WB }
+    val_na = { ( "NA" ) ~ WB }
+    val_inf = { ( "Inf" ) ~ WB }
+    val_true = { ( "TRUE" ) ~ WB }
+    val_false = { ( "FALSE" ) ~ WB }
+
+// atomic value types
+
+    number = @{ number_leading | number_trailing }
+        number_leading = { ("0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT*) ~ ("." ~ (ASCII_DIGIT ~ ASCII_DIGIT*))? }
+        number_trailing = { "." ~ ASCII_DIGIT* }
+
+    integer_expr = _{ integer ~ "L" }
+        integer = @{( ASCII_NONZERO_DIGIT ~ ("_"? ~ ASCII_DIGIT)* | "0" ) }
+
+    string_expr = _{ "\"" ~ double_quoted_string ~ "\"" | "'" ~ single_quoted_string ~ "'" }
+        single_quoted_string = @{ single_quoted_string_char* }
+        double_quoted_string = @{ double_quoted_string_char* }
+        single_quoted_string_char = _{ !("'"  | "\\") ~ ANY | escaped_char }
+        double_quoted_string_char = _{ !("\"" | "\\") ~ ANY | escaped_char }
+        escaped_char = _{
+              "\\" ~ ("\"" | "'" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
+            | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
+        }
+
+    symbol = _{ symbol_with_backticks | symbol_ident }
+        symbol_with_backticks = _{ "`" ~ symbol_backticked ~ "`" }
+        symbol_backticked = ${ ( !"`" ~ ANY )* }
+        symbol_ident = ${ ( LETTER | OTHER_SYMBOL | "_" | "." ) ~ ( ASCII_ALPHANUMERIC | "_" | "." )* }
+
+    pairs = _{ ( ( WS* ~ elem ~ WS* ~ "," )* ~ WS* ~ elem? )? ~ WS* }
+        elem = _{ named | expr }
+        named = { symbol ~ WS* ~ "=" ~ WS* ~ expr? }
+

@@ -1,0 +1,26 @@
+[package]
+name = "rfmt"
+description = "An R formatter and linter"
+authors = ["Doug Kelkhoff"]
+version = "0.1.0"
+edition = "2021"
+
+license-file = "LICENSE.md"
+
+repository = "https://github.com/dgkf/rfmt/"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "r"
+path = "src/bin.rs"
+
+[profile.release]
+lto = true
+
+[dependencies]
+
+# parser
+pest = "2.7.10"
+pest_derive = "2.7.10"
